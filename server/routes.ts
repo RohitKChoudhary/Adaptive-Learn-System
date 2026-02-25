@@ -6,14 +6,13 @@ import { z } from "zod";
 import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import multer from "multer";
-import OpenAI from "openai";
+import Groq from "groq-sdk";
 
 const upload = multer({ storage: multer.memoryStorage() });
 const JWT_SECRET = process.env.SESSION_SECRET || "learnai_secret";
 
-const openai = new OpenAI({
-  apiKey: process.env.AI_INTEGRATIONS_OPENAI_API_KEY,
-  baseURL: process.env.AI_INTEGRATIONS_OPENAI_BASE_URL,
+const groq = new Groq({
+  apiKey: "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",
 });
 
 function hashPassword(password: string) {
@@ -83,22 +82,53 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   const generateCourse = async (type: string, fileBuffer: Buffer, userId: string) => {
-    const courseTitle = type === "FULL" ? "Advanced AI Concepts" : "Quick AI Revision";
+    const syllabus = fileBuffer.toString() || "Artificial Intelligence Basics";
+    
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `You are a professional course creator. Based on the syllabus provided, generate a structured course.
+          Return a JSON object with:
+          {
+            "title": "Course Title",
+            "topics": [
+              {
+                "title": "Topic Title",
+                "content": "Detailed markdown content",
+                "aiSummary": "2 sentence summary",
+                "notebook": null
+              }
+            ]
+          }
+          Generate exactly 3 topics. For "FULL" course, make content long and detailed. For "ONESHOT", make it a concise quick revision.`,
+        },
+        {
+          role: "user",
+          content: `Syllabus: ${syllabus}\nCourse Type: ${type}`,
+        },
+      ],
+      model: "llama-3.3-70b-versatile",
+      response_format: { type: "json_object" },
+    });
+
+    const result = JSON.parse(completion.choices[0].message.content!);
     
     const course = await storage.createCourse({
       userId,
-      title: courseTitle,
+      title: result.title,
       courseType: type
     });
 
-    for (let i = 1; i <= 3; i++) {
+    for (let i = 0; i < result.topics.length; i++) {
+      const topic = result.topics[i];
       await storage.createTopic({
         courseId: course.id,
-        title: `Chapter ${i}: Fundamentals`,
-        content: `## Fundamentals\n\nThis is the AI generated content for chapter ${i}. It covers the basics.\n\n### Key Takeaways\n- Point 1\n- Point 2\n\n\`\`\`javascript\nconsole.log("Hello AI");\n\`\`\``,
-        orderIndex: i,
-        aiSummary: `TL;DR: Chapter ${i} covers the core fundamentals necessary to understand the subsequent material.`,
-        notebook: null
+        title: topic.title,
+        content: topic.content,
+        orderIndex: i + 1,
+        aiSummary: topic.aiSummary,
+        notebook: topic.notebook
       });
     }
 
@@ -107,13 +137,23 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   };
 
   app.post(api.courses.createFull.path, authenticateToken, upload.single('file'), async (req, res) => {
-    const result = await generateCourse("FULL", req.file?.buffer || Buffer.from(""), (req as any).user.id);
-    res.status(201).json(result);
+    try {
+      const result = await generateCourse("FULL", req.file?.buffer || Buffer.from(""), (req as any).user.id);
+      res.status(201).json(result);
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ message: "AI generation failed" });
+    }
   });
 
   app.post(api.courses.createOneShot.path, authenticateToken, upload.single('file'), async (req, res) => {
-    const result = await generateCourse("ONESHOT", req.file?.buffer || Buffer.from(""), (req as any).user.id);
-    res.status(201).json(result);
+    try {
+      const result = await generateCourse("ONESHOT", req.file?.buffer || Buffer.from(""), (req as any).user.id);
+      res.status(201).json(result);
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ message: "AI generation failed" });
+    }
   });
 
   app.get(api.courses.listFull.path, authenticateToken, async (req, res) => {
@@ -134,60 +174,81 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.get(api.quiz.getChapterQuiz.path, authenticateToken, async (req, res) => {
-    res.json({
-      difficulty: "Medium",
-      questions: [
+    const topicId = req.params.topic_id;
+    const topic = await storage.getTopic(topicId);
+    
+    const completion = await groq.chat.completions.create({
+      messages: [
         {
-          question: "What is the primary function of a neural network?",
-          options: ["Pattern recognition", "Data storage", "Web hosting", "Cooling servers"],
-          correct_answer: "Pattern recognition",
-          explanation: "Neural networks excel at recognizing patterns in data."
+          role: "system",
+          content: `Generate a quiz for the following content. Return JSON:
+          {
+            "difficulty": "Medium",
+            "questions": [
+              {
+                "question": "...",
+                "options": ["A", "B", "C", "D"],
+                "correct_answer": "...",
+                "explanation": "..."
+              }
+            ]
+          }
+          Generate 5 questions.`,
         },
         {
-          question: "Which of the following is an activation function?",
-          options: ["ReLU", "RAM", "CPU", "HTML"],
-          correct_answer: "ReLU",
-          explanation: "ReLU (Rectified Linear Unit) is a common activation function."
+          role: "user",
+          content: topic?.content || "AI Basics",
         },
-        {
-          question: "What does NLP stand for?",
-          options: ["Natural Language Processing", "New Learning Protocol", "Neural Logic Program", "None of the above"],
-          correct_answer: "Natural Language Processing",
-          explanation: "NLP refers to Natural Language Processing."
-        },
-        {
-          question: "Backpropagation is used for:",
-          options: ["Training neural networks", "Building UI", "Running SQL", "Formatting text"],
-          correct_answer: "Training neural networks",
-          explanation: "Backpropagation calculates the gradient of the loss function."
-        },
-        {
-          question: "A tensor is...",
-          options: ["A mathematical object", "A type of database", "A web framework", "A monitor brand"],
-          correct_answer: "A mathematical object",
-          explanation: "Tensors are multi-dimensional arrays used in ML."
-        }
-      ]
+      ],
+      model: "llama-3.3-70b-versatile",
+      response_format: { type: "json_object" },
     });
+
+    res.json(JSON.parse(completion.choices[0].message.content!));
   });
 
   app.post(api.quiz.submit.path, authenticateToken, async (req, res) => {
+    const { answers, correct_answers } = req.body;
+    let score = 0;
+    answers.forEach((ans: string, i: number) => {
+      if (ans === correct_answers[i]) score++;
+    });
+    
+    const percentage = (score / answers.length) * 100;
+    let next_difficulty = "Medium";
+    if (percentage >= 80) next_difficulty = "Hard";
+    else if (percentage < 50) next_difficulty = "Easy";
+
     res.json({
-      score: 4,
-      total: 5,
-      percentage: 80,
-      next_difficulty: "Hard",
-      message: "Excellent! Moving to harder concepts."
+      score,
+      total: answers.length,
+      percentage,
+      next_difficulty,
+      message: percentage >= 80 ? "Excellent work!" : "Keep practicing!"
     });
   });
 
   app.get(api.quiz.getFullTest.path, authenticateToken, async (req, res) => {
-    res.json(Array(15).fill({
-        question: "Sample Test Question",
-        options: ["A", "B", "C", "D"],
-        correct_answer: "A",
-        explanation: "Because A is the correct placeholder answer."
-      }));
+    const topicId = req.params.topic_id;
+    const topic = await storage.getTopic(topicId);
+
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `Generate a 15-question mixed difficulty test. Return JSON array of questions.`,
+        },
+        {
+          role: "user",
+          content: topic?.content || "AI Basics",
+        },
+      ],
+      model: "llama-3.3-70b-versatile",
+      response_format: { type: "json_object" },
+    });
+
+    const result = JSON.parse(completion.choices[0].message.content!);
+    res.json(result.questions || result);
   });
 
   app.get(api.quiz.getNotebook.path, authenticateToken, async (req, res) => {
@@ -203,19 +264,52 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post(api.comprehension.docUpload.path, authenticateToken, upload.single('file'), async (req, res) => {
-    res.json({ session_id: crypto.randomUUID(), text: "Extracted document text from uploaded file..." });
+    const text = req.file?.buffer.toString() || "Sample text";
+    res.json({ session_id: crypto.randomUUID(), text });
   });
 
   app.post(api.comprehension.docAsk.path, authenticateToken, async (req, res) => {
-    res.json({ answer: "Based on the document, here is your AI-generated answer. It looks like the concept is heavily reliant on linear algebra." });
+    const { question, text } = req.body;
+    
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `Answer the question based on the provided document text.`,
+        },
+        {
+          role: "user",
+          content: `Document: ${text}\nQuestion: ${question}`,
+        },
+      ],
+      model: "llama-3.3-70b-versatile",
+    });
+
+    res.json({ answer: completion.choices[0].message.content });
   });
 
   app.post(api.comprehension.videoExtract.path, authenticateToken, async (req, res) => {
-    res.json({ session_id: crypto.randomUUID(), text: "Extracted video transcript from YouTube..." });
+    res.json({ session_id: crypto.randomUUID(), text: "Extracted video transcript from YouTube URL: " + req.body.url });
   });
 
   app.post(api.comprehension.videoAsk.path, authenticateToken, async (req, res) => {
-    res.json({ answer: "According to the video transcript, the speaker emphasizes the importance of data quality." });
+    const { question, text } = req.body;
+    
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `Answer the question based on the video transcript provided.`,
+        },
+        {
+          role: "user",
+          content: `Transcript: ${text}\nQuestion: ${question}`,
+        },
+      ],
+      model: "llama-3.3-70b-versatile",
+    });
+
+    res.json({ answer: completion.choices[0].message.content });
   });
 
   return httpServer;
