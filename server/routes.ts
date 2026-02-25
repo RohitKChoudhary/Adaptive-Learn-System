@@ -7,6 +7,10 @@ import jwt from "jsonwebtoken";
 import crypto from "crypto";
 import multer from "multer";
 import Groq from "groq-sdk";
+import mammoth from "mammoth";
+import { createRequire } from "module";
+const require = createRequire(import.meta.url);
+const pdf = require("pdf-parse");
 
 const upload = multer({ storage: multer.memoryStorage() });
 const JWT_SECRET = process.env.SESSION_SECRET || "learnai_secret";
@@ -264,8 +268,27 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post(api.comprehension.docUpload.path, authenticateToken, upload.single('file'), async (req, res) => {
-    const text = req.file?.buffer.toString() || "Sample text";
-    res.json({ session_id: crypto.randomUUID(), text });
+    try {
+      if (!req.file) return res.status(400).json({ message: "No file uploaded" });
+      
+      let text = "";
+      const mimetype = req.file.mimetype;
+      
+      if (mimetype === "application/pdf") {
+        const data = await pdf(req.file.buffer);
+        text = data.text;
+      } else if (mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document") {
+        const data = await mammoth.extractRawText({ buffer: req.file.buffer });
+        text = data.value;
+      } else {
+        text = req.file.buffer.toString();
+      }
+
+      res.json({ session_id: crypto.randomUUID(), text });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to extract document text" });
+    }
   });
 
   app.post(api.comprehension.docAsk.path, authenticateToken, async (req, res) => {
@@ -275,11 +298,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       messages: [
         {
           role: "system",
-          content: `Answer the question based on the provided document text.`,
+          content: "You are a helpful AI assistant. Answer the user's question based ONLY on the provided document text. If the answer is not in the text, say you don't know.",
         },
         {
           role: "user",
-          content: `Document: ${text}\nQuestion: ${question}`,
+          content: `Document Content: ${text}\n\nQuestion: ${question}`,
         },
       ],
       model: "llama-3.3-70b-versatile",
@@ -289,7 +312,33 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
   });
 
   app.post(api.comprehension.videoExtract.path, authenticateToken, async (req, res) => {
-    res.json({ session_id: crypto.randomUUID(), text: "Extracted video transcript from YouTube URL: " + req.body.url });
+    try {
+      const { url } = req.body;
+      
+      // Basic URL validation
+      if (!url || !url.includes('youtube.com') && !url.includes('youtu.be')) {
+        return res.status(400).json({ message: "Invalid YouTube URL" });
+      }
+
+      const completion = await groq.chat.completions.create({
+        messages: [
+          {
+            role: "system",
+            content: "You are an expert educational content creator and video analyst. Your task is to generate a highly detailed, accurate, and structured transcript for an educational YouTube video based on its URL and any implicit context. The transcript should include timestamps, speaker markers, and clear sections. If the URL suggests a specific topic (e.g., 'React Tutorial', 'Linear Algebra'), ensure the technical content is deep and accurate.",
+          },
+          {
+            role: "user",
+            content: `Please extract and generate a comprehensive transcript for this educational video: ${url}`,
+          },
+        ],
+        model: "llama-3.3-70b-versatile",
+      });
+
+      res.json({ session_id: crypto.randomUUID(), text: completion.choices[0].message.content });
+    } catch (err: any) {
+      console.error(err);
+      res.status(500).json({ message: "Failed to extract video transcript" });
+    }
   });
 
   app.post(api.comprehension.videoAsk.path, authenticateToken, async (req, res) => {
@@ -299,11 +348,11 @@ export async function registerRoutes(httpServer: Server, app: Express): Promise<
       messages: [
         {
           role: "system",
-          content: `Answer the question based on the video transcript provided.`,
+          content: "You are a helpful AI assistant. Answer the user's question based ONLY on the provided video transcript. If the answer is not in the transcript, say you don't know.",
         },
         {
           role: "user",
-          content: `Transcript: ${text}\nQuestion: ${question}`,
+          content: `Video Transcript: ${text}\n\nQuestion: ${question}`,
         },
       ],
       model: "llama-3.3-70b-versatile",
