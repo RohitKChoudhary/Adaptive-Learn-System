@@ -1,0 +1,201 @@
+here's your prompt:
+
+Build a full-stack adaptive learning platform (like Coursera) called "LearnAI".
+
+Tech Stack
+
+React + Tailwind CSS frontend
+
+All AI features call the backend API (base URL configurable)
+
+Clean, modern UI similar to Coursera/Udemy
+
+Backend API
+
+Base URL: http://localhost:8000 (make it configurable in a config file)
+
+All requests except login/register need header: Authorization: Bearer <token>
+
+Auth endpoints
+
+POST /api/auth/register — {email, password, full_name}
+
+POST /api/auth/login — {email, password} → returns {access_token}
+
+GET /api/auth/me → returns user info
+
+Course endpoints
+
+POST /api/fullcourse/create — multipart form with file (syllabus upload) → returns course with topics
+
+POST /api/oneshot/create — multipart form with file → returns course with topics
+
+GET /api/fullcourse/ — list all full courses
+
+GET /api/oneshot/ — list all oneshot courses
+
+GET /api/fullcourse/{course_id} — get single course
+
+Course response shape
+
+{
+  "id": "uuid",
+  "title": "string",
+  "course_type": "FULL or ONESHOT",
+  "created_at": "datetime",
+  "topics": [
+    {
+      "id": "uuid",
+      "title": "string",
+      "content": "markdown string",
+      "order_index": 1,
+      "ai_summary": "2 sentence tldr",
+      "notebook": null or { "cells": [{"type": "markdown/code", "content": "string"}] }
+    }
+  ]
+}
+
+
+Quiz endpoints
+
+GET /api/quiz/chapter/{topic_id} → returns {difficulty, questions: [{question, options, correct_answer, explanation}]}
+
+POST /api/quiz/submit — {topic_id, answers: ["A","B",...], correct_answers: ["A","C",...]} → returns {score, total, percentage, next_difficulty, message}
+
+GET /api/quiz/full-test/{topic_id} → 15 questions mixed difficulty
+
+GET /api/quiz/notebook/{topic_id} → returns notebook cells
+
+GET /api/quiz/progress/{course_id} → returns per-chapter progress with difficulty and accuracy
+
+Comprehension endpoints
+
+POST /api/doc-comprehension/upload — file upload → {session_id, text}
+
+POST /api/doc-comprehension/ask — {question, session_id, text} → {answer}
+
+POST /api/video-comprehension/extract — {url} → {session_id, text}
+
+POST /api/video-comprehension/ask — {question, session_id, text} → {answer}
+
+Pages & Features
+
+1. Landing page
+
+Clean hero section, CTA to sign up, feature highlights
+
+2. Auth — Login & Register pages
+
+Standard forms, JWT stored in localStorage
+
+3. Dashboard (after login)
+
+Shows user's full courses and oneshot courses in separate tabs
+
+Each course card shows title, number of chapters, creation date
+
+"Create New Course" button
+
+4. Create Course page
+
+Toggle between "Full Course" (detailed chapters) and "OneShot" (quick revision)
+
+Upload syllabus file (.txt, .pdf, .docx)
+
+Loading state while AI generates (show progress animation — "Analyzing syllabus... Generating modules... Creating chapters...")
+
+On success, redirect to the course page
+
+5. Course page (main learning view — make this look like Coursera)
+
+Left sidebar: chapter list with progress indicators (locked/unlocked/completed icons)
+
+Main content area: renders chapter content as markdown with syntax highlighting for code
+
+Top bar: course title, progress bar showing % completed
+
+Each chapter shows:
+
+Content (markdown rendered, code blocks highlighted)
+
+AI Summary pill at the top ("TL;DR: ...")
+
+If notebook exists → "Open Notebook" button that shows the cells inline (markdown rendered, code in styled code blocks with a "Copy" button)
+
+"Take Chapter Quiz" button at the bottom of each chapter
+
+"Full Test" button
+
+6. Chapter Quiz modal/page
+
+Shows 5 MCQ questions one at a time (not all at once)
+
+Shows current difficulty badge (Easy/Medium/Hard) with color coding
+
+After each question, show if correct/wrong with explanation
+
+At the end show score, message, and what difficulty next chapter will be
+
+Submit answers to /api/quiz/submit
+
+7. Full Test page
+
+15 questions, timer (30 min), submit all at once
+
+After submit, show results breakdown by difficulty (easy/medium/hard scores)
+
+8. Progress page
+
+Per-chapter accuracy bars
+
+Current difficulty for each chapter
+
+Overall course completion %
+
+9. Document Comprehension page
+
+Upload a document
+
+Chat interface to ask questions about it
+
+Show conversation history in the session
+
+10. Video Comprehension page
+
+Paste YouTube URL
+
+Extract transcript button
+
+Same chat interface as document comprehension
+
+UI/UX Requirements
+
+Color scheme: Deep navy + electric blue accent (like a modern edtech platform)
+
+Typography: Clean, readable — Inter or similar
+
+Course page: Must feel like Coursera — sidebar navigation, clean content area, progress tracking
+
+Code blocks: Syntax highlighted, dark theme, copy button
+
+Markdown rendering: Full markdown support including tables, bold, italic, lists
+
+Responsive: Works on mobile and desktop
+
+Loading states: Skeleton loaders, not spinners where possible
+
+Animations: Subtle — page transitions, quiz answer feedback animations
+
+Multilingual UI: Add a language selector in the navbar. Support English, Hindi, Spanish, French, Arabic. All static UI text should switch language. (Course content stays in original language)
+
+Notebook viewer: When notebook cells exist, show them in a Jupyter-style interface — alternating markdown and code cells, each code cell has a copy button
+
+Important notes
+
+Backend API base URL should be in a single config file at the top so it's easy to change
+
+JWT token stored in localStorage, auto-redirect to login if 401
+
+All API errors should show as toast notifications
+
+The quiz flow is adaptive — after submitting quiz, show the next difficulty prominently so user knows the system is adjusting for them
