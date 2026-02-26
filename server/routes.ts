@@ -16,7 +16,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const JWT_SECRET = process.env.SESSION_SECRET || "learnai_secret";
 
 const groq = new Groq({
-  apiKey: process.env.GROQ_API_KEY, // Use environment variable
+  apiKey: "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",
 });
 
 function hashPassword(password: string) {
@@ -95,102 +95,134 @@ export async function registerRoutes(
     res.json({ id: user.id, email: user.email, fullName: user.fullName });
   });
 
-  const generateCourse = async (
-    type: string,
-    fileBuffer: Buffer,
-    userId: string,
-  ) => {
-    const syllabus = fileBuffer.toString() || "Artificial Intelligence Basics";
+  // Step 1: Get outline (title + topic titles) — tiny response, stays under token limit
+  const generateOutline = async (syllabus: string, type: string) => {
+    const topicCount = type === "FULL" ? 5 : 4;
+    const completion = await groq.chat.completions.create({
+      messages: [
+        {
+          role: "system",
+          content: `You are a curriculum designer. Based on the syllabus, return ONLY a JSON object with a course title and ${topicCount} chapter titles. Nothing else.
+Format:
+{
+  "title": "Course Title",
+  "topics": ["Chapter 1 Title", "Chapter 2 Title", ...]
+}`,
+        },
+        { role: "user", content: `Syllabus: ${syllabus}` },
+      ],
+      model: "llama-3.3-70b-versatile",
+      response_format: { type: "json_object" },
+      max_tokens: 500,
+    });
+    return JSON.parse(completion.choices[0].message.content!);
+  };
 
+  // Step 2: Generate full content for ONE topic — each call is independent and small enough
+  const generateTopicContent = async (
+    courseTitle: string,
+    topicTitle: string,
+    topicIndex: number,
+    totalTopics: number,
+    syllabus: string,
+    type: string,
+  ) => {
     const isFullCourse = type === "FULL";
 
     const systemPrompt = isFullCourse
-      ? `You are an expert curriculum designer and technical writer. Generate a comprehensive, university-level course based on the provided syllabus.
-
-Return a JSON object with this exact structure:
+      ? `You are an expert technical writer. Write a detailed educational chapter for an online course.
+Return a JSON object with exactly these fields:
 {
-  "title": "Course Title",
-  "topics": [
-    {
-      "title": "Topic Title",
-      "content": "...",
-      "aiSummary": "2 sentence TL;DR",
-      "notebook": null
-    }
-  ]
+  "content": "full markdown chapter content here",
+  "aiSummary": "exactly 2 sentences summarizing this chapter"
 }
 
-CRITICAL REQUIREMENTS FOR CONTENT:
-- Generate exactly 5 topics/chapters that logically build on each other
-- Each topic's "content" field MUST be a very long, detailed markdown string (minimum 800-1200 words each)
-- Structure each chapter with multiple H2 and H3 headings
-- Include ALL of the following in every chapter:
-  * Detailed conceptual explanation with real-world analogies
-  * At least 2-3 code examples (use fenced code blocks with language tags like \`\`\`python or \`\`\`javascript)
-  * A "Key Concepts" section summarizing the main points
-  * A "Common Pitfalls" or "Best Practices" section
-  * Step-by-step examples where applicable
-  * Tables comparing concepts where relevant
-  * Numbered/bulleted lists for procedures or comparisons
-- The "aiSummary" should be exactly 2 sentences: what the chapter covers and why it matters
-- Make content feel like a real textbook chapter, not a bullet-point summary
-- Code examples should be realistic and runnable, not pseudocode`
-      : `You are an expert educator creating a rapid-revision guide. Generate a concise but comprehensive OneShot course based on the provided syllabus.
-
-Return a JSON object with this exact structure:
+REQUIREMENTS for "content":
+- 600-800 words of educational markdown
+- Start with a brief intro paragraph
+- Use H2 (##) and H3 (###) headings to organize sections  
+- Include 1-2 realistic, runnable code examples in fenced code blocks with language tags
+- Include a "## Key Concepts" section as a bullet list
+- Include a "## Common Pitfalls" section with 2-3 gotchas
+- Write like a textbook, not a list of facts`
+      : `You are an expert educator writing a quick-revision chapter.
+Return a JSON object with exactly these fields:
 {
-  "title": "Course Title [OneShot]",
-  "topics": [
-    {
-      "title": "Topic Title",
-      "content": "...",
-      "aiSummary": "2 sentence TL;DR",
-      "notebook": null
-    }
-  ]
+  "content": "concise markdown chapter content here",
+  "aiSummary": "exactly 2 sentences summarizing this chapter"
 }
 
-CRITICAL REQUIREMENTS FOR CONTENT:
-- Generate exactly 4 topics covering the most important areas
-- Each topic's "content" MUST be 400-600 words — concise but packed with value
-- Use this structure for each chapter:
-  * Quick intro (2-3 sentences)
-  * Core concepts in a well-organized bullet/numbered list with brief explanations
-  * At least 1 code snippet showing the most important practical pattern
-  * "Remember This" box at the end (key formula, rule, or pattern to memorize)
-- Focus on exam-ready, revision-friendly content
-- The "aiSummary" should be exactly 2 sentences: what the chapter covers and why it matters`;
+REQUIREMENTS for "content":
+- 350-500 words, dense and revision-friendly
+- Brief intro (2 sentences)
+- Bullet/numbered list of core concepts with short explanations
+- 1 code snippet showing the key pattern
+- End with a "## Remember This" section with the most important takeaway`;
 
     const completion = await groq.chat.completions.create({
       messages: [
         { role: "system", content: systemPrompt },
         {
           role: "user",
-          content: `Syllabus:\n${syllabus}\n\nGenerate a ${isFullCourse ? "full detailed" : "oneshot revision"} course from this syllabus. Make the content genuinely educational and comprehensive.`,
+          content: `Course: "${courseTitle}"
+Chapter ${topicIndex + 1} of ${totalTopics}: "${topicTitle}"
+Syllabus context: ${syllabus.slice(0, 500)}
+
+Write this chapter now.`,
         },
       ],
       model: "llama-3.3-70b-versatile",
       response_format: { type: "json_object" },
-      max_tokens: 8000,
+      max_tokens: 3000,
     });
+    return JSON.parse(completion.choices[0].message.content!);
+  };
 
-    const result = JSON.parse(completion.choices[0].message.content!);
+  const generateCourse = async (
+    type: string,
+    fileBuffer: Buffer,
+    userId: string,
+  ) => {
+    const syllabus = fileBuffer.toString().trim() || "Artificial Intelligence Basics";
+
+    // Call 1: Get outline (fast, ~500 tokens)
+    const outline = await generateOutline(syllabus, type);
 
     const course = await storage.createCourse({
       userId,
-      title: result.title,
+      title: outline.title,
       courseType: type,
     });
 
-    for (let i = 0; i < result.topics.length; i++) {
-      const topic = result.topics[i];
+    // Calls 2..N: Generate each topic separately (each ~3000 tokens, well under 12k limit)
+    for (let i = 0; i < outline.topics.length; i++) {
+      const topicTitle = outline.topics[i];
+      let topicData: any;
+      try {
+        topicData = await generateTopicContent(
+          outline.title,
+          topicTitle,
+          i,
+          outline.topics.length,
+          syllabus,
+          type,
+        );
+      } catch (err) {
+        // If one topic fails, use a placeholder so the rest still save
+        console.error(`Failed to generate topic ${i + 1}:`, err);
+        topicData = {
+          content: `# ${topicTitle}\n\nContent generation failed for this chapter. Please try regenerating.`,
+          aiSummary: `This chapter covers ${topicTitle}. Content could not be generated.`,
+        };
+      }
+
       await storage.createTopic({
         courseId: course.id,
-        title: topic.title,
-        content: topic.content,
+        title: topicTitle,
+        content: topicData.content || "",
         orderIndex: i + 1,
-        aiSummary: topic.aiSummary,
-        notebook: topic.notebook,
+        aiSummary: topicData.aiSummary || "",
+        notebook: null,
       });
     }
 

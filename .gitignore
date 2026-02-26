@@ -1,9 +1,22 @@
-node_modules
-dist
-.DS_Store
-server/public
-vite.config.ts.*
-*.tar.gz
-.env
+# Dependencies
 node_modules/
+
+# Build output
 dist/
+
+# Environment variables - NEVER commit this
+.env
+
+# Misc
+.DS_Store
+*.log
+npm-debug.log*
+
+# TypeScript
+*.tsbuildinfo
+
+# Replit (can delete these folders entirely)
+.replit
+.config/
+client/replit_integrations/
+server/replit_integrations/
