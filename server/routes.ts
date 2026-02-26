@@ -16,7 +16,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 const JWT_SECRET = process.env.SESSION_SECRET || "learnai_secret";
 
 const groq = new Groq({
-  apiKey: "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",
+  apiKey: process.env.GROQ_API_KEY, // Use environment variable
 });
 
 function hashPassword(password: string) {
