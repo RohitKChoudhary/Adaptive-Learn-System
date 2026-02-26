@@ -13,10 +13,10 @@ const require = createRequire(import.meta.url);
 const pdf = require("pdf-parse");
 
 const upload = multer({ storage: multer.memoryStorage() });
-const JWT_SECRET = process.env.SESSION_SECRET || "learnai_secret";
+const JWT_SECRET = process.env.JWT_SECRET || process.env.SESSION_SECRET || "learnai_dev_secret_change_in_prod";
 
 const groq = new Groq({
-  apiKey: "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",
+  apiKey: process.env.GROQ_API_KEY!,
 });
 
 function hashPassword(password: string) {
@@ -467,7 +467,7 @@ Write this chapter now.`,
         model: "llama-3.3-70b-versatile",
       });
 
-      res.json({ answer: completion.choices[0].message.content });
+      res.json({ answer: completion.choices[0].message.content ?? "" });
     },
   );
 
@@ -503,7 +503,7 @@ Write this chapter now.`,
 
         res.json({
           session_id: crypto.randomUUID(),
-          text: completion.choices[0].message.content,
+          text: completion.choices[0].message.content ?? "",
         });
       } catch (err: any) {
         console.error(err);
@@ -533,7 +533,7 @@ Write this chapter now.`,
         model: "llama-3.3-70b-versatile",
       });
 
-      res.json({ answer: completion.choices[0].message.content });
+      res.json({ answer: completion.choices[0].message.content ?? "" });
     },
   );
 
